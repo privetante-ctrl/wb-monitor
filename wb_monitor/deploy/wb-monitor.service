@@ -1,0 +1,22 @@
+# systemd-юнит для основного процесса (бот + APScheduler).
+# Установка: см. README.md, раздел «Деплой на VPS».
+[Unit]
+Description=WB competitor monitor (bot + scheduler)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wbmon
+WorkingDirectory=/opt/wb_monitor/wb_monitor
+ExecStart=/opt/wb_monitor/venv/bin/python cli.py run
+Restart=always
+RestartSec=10
+# .env лежит рядом с cli.py (WorkingDirectory), config.py подхватит его сам
+
+# журналирование в journald
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
