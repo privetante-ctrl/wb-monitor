@@ -219,3 +219,12 @@ journalctl -u wb-monitor -f     # логи
 Резервный план: если APScheduler окажется нестабильным, те же job'ы
 дёргаются системным cron'ом через CLI (`cli.py run-parse && cli.py
 run-alerts`) — код job'ов от планировщика не зависит.
+
+---
+
+## Автор
+
+**privetante-ctrl** — [privetante@gmail.com](mailto:privetante@gmail.com)
+GitHub: [github.com/privetante-ctrl](https://github.com/privetante-ctrl)
+
+Лицензия — MIT: пользуйся, меняй, встраивай к себе.
