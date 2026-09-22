@@ -1,6 +1,9 @@
-"""Команды бота. Админские (добавить клиента/SKU) доступны только тебе
-(ADMIN_CHAT_ID), клиенты видят только /start c их chat_id — чтобы прислать
-его тебе при подключении.
+"""Текстовые админ-команды для работы с ЧУЖИМИ клиентами.
+
+Кнопочное меню (bot/menu.py) закрывает сценарий «слежу за своими
+конкурентами» и /start с ним же. Здесь — то, что нужно, когда сервис
+продаётся дальше: завести клиента, повесить на него SKU, выслать отчёт.
+Доступно только из админского чата.
 """
 
 from __future__ import annotations
@@ -12,13 +15,16 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from sqlalchemy import select
 
+from sqlalchemy.exc import IntegrityError
+
 from wb_monitor.models import Client, Tier, TrackedSKU
 from wb_monitor.scheduler.jobs import SessionFactory, weekly_report_job
+from wb_monitor.state import AdminRef
 
 logger = logging.getLogger(__name__)
 
 HELP = (
-    "Админ-команды:\n"
+    "Команды для работы с клиентами (свои товары — кнопками в /menu):\n"
     "/add_client <имя>; <chat_id>; <тариф>; <цена> — новый клиент\n"
     "   тариф: basic | standard | pro\n"
     "/add_sku <client_id> <nmId> <название> [own] — новый SKU (own = свой товар)\n"
@@ -28,22 +34,16 @@ HELP = (
 )
 
 
-def create_router(session_factory: SessionFactory, admin_chat_id: int, reports_dir: str) -> Router:
+def create_router(session_factory: SessionFactory, admin: AdminRef, reports_dir: str) -> Router:
     router = Router()
 
     def is_admin(message: Message) -> bool:
-        return message.chat.id == admin_chat_id
+        return admin.is_set and message.chat.id == admin.chat_id
 
-    @router.message(Command("start", "help"))
-    async def cmd_start(message: Message) -> None:
+    @router.message(Command("admin"))
+    async def cmd_admin(message: Message) -> None:
         if is_admin(message):
             await message.answer(HELP)
-        else:
-            await message.answer(
-                "Это бот мониторинга конкурентов на Wildberries.\n"
-                f"Ваш chat_id: {message.chat.id} — передайте его менеджеру "
-                "для подключения отчётов."
-            )
 
     @router.message(Command("add_client"))
     async def cmd_add_client(message: Message, command: CommandObject) -> None:
@@ -62,7 +62,12 @@ def create_router(session_factory: SessionFactory, admin_chat_id: int, reports_d
             return
         async with session_factory() as session:
             session.add(client)
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                await message.answer(f"Клиент с chat_id {chat_id} уже заведён.")
+                return
             await message.answer(f"Клиент #{client.id} «{name}» добавлен ({tier}).")
 
     @router.message(Command("add_sku"))

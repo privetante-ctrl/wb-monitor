@@ -150,3 +150,18 @@ class ParseRun(Base):
     # выставляется, если доля ошибок/нулей за проход выше порога из thresholds.py;
     # alert_check_job такой проход пропускает (не шлёт клиентам ложные "остаток 0")
     is_suspicious: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class AppSetting(Base):
+    """Key-value для настроек, которые ставятся на ходу, а не через .env.
+
+    Сейчас здесь живёт ровно одно: admin_chat_id, который бот запоминает сам
+    при первом /start. Благодаря этому в .env достаточно положить BOT_TOKEN —
+    свой chat_id искать через @userinfobot больше не нужно.
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(50), primary_key=True)
+    value: Mapped[str] = mapped_column(String(200))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

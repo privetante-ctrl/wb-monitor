@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 from sqlalchemy import select
@@ -27,6 +27,7 @@ from wb_monitor.models import (
 from wb_monitor.parser.client import HttpClient, WBRequestError
 from wb_monitor.parser.wb_api import fetch_sku
 from wb_monitor.scheduler import thresholds
+from wb_monitor.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ async def parse_job(session_factory: SessionFactory, http: HttpClient) -> ParseR
     ParseRun.failed_count.
     """
     async with session_factory() as session:
-        run = ParseRun(started_at=datetime.utcnow())
+        run = ParseRun(started_at=utcnow())
         session.add(run)
 
         skus = (
@@ -68,7 +69,7 @@ async def parse_job(session_factory: SessionFactory, http: HttpClient) -> ParseR
             session.add(
                 PriceSnapshot(
                     sku_id=sku.id,
-                    checked_at=datetime.utcnow(),
+                    checked_at=utcnow(),
                     price=data.price,
                     discount_price=data.discount_price,
                     stock_qty=data.stock_qty,
@@ -78,7 +79,7 @@ async def parse_job(session_factory: SessionFactory, http: HttpClient) -> ParseR
             if data.stock_qty == 0:
                 run.zero_stock_count += 1
 
-        run.finished_at = datetime.utcnow()
+        run.finished_at = utcnow()
         run.is_suspicious = _run_looks_broken(run)
         await session.commit()
 
@@ -231,7 +232,7 @@ async def alert_check_job(session_factory: SessionFactory, bot: BotLike | None) 
                     snapshot_id=cur.id,
                     alert_type=candidate.alert_type,
                     message=candidate.message[:500],
-                    sent_at=datetime.utcnow(),
+                    sent_at=utcnow(),
                 ))
                 # коммитим ДО отправки: упасть между отправкой и записью —
                 # это повторный алерт клиенту; между записью и отправкой —
@@ -269,7 +270,7 @@ async def health_check_job(
             await session.execute(select(ParseRun).order_by(ParseRun.id.desc()).limit(1))
         ).scalar_one_or_none()
 
-        stale_after = datetime.utcnow() - timedelta(hours=thresholds.PARSE_STALE_HOURS)
+        stale_after = utcnow() - timedelta(hours=thresholds.PARSE_STALE_HOURS)
         if last_run is None:
             problems.append("parse_job ещё ни разу не отработал — планировщик запущен?")
         elif last_run.started_at < stale_after:
@@ -304,7 +305,7 @@ async def health_check_job(
                 sku_id=None,
                 alert_type=AlertType.SCRAPER_BROKEN.value,
                 message=text[:500],
-                sent_at=datetime.utcnow(),
+                sent_at=utcnow(),
             ))
         if problems:
             await session.commit()
@@ -341,7 +342,7 @@ async def weekly_report_job(
         format_period,
     )
 
-    end = period_end or (datetime.utcnow().date() - timedelta(days=1))
+    end = period_end or (utcnow().date() - timedelta(days=1))
     start = end - timedelta(days=6)
 
     generated: list[str] = []

@@ -22,6 +22,10 @@ import click
 from wb_monitor.config import settings
 from wb_monitor.db import init_db, make_engine, make_sessionmaker
 
+# Ходовой товар, который вряд ли исчезнет: на нём doctor проверяет, что
+# card-эндпоинт WB вообще отвечает и разбирается.
+PROBE_NM_ID = "18234561"
+
 
 def _run(coro_factory) -> None:
     """Открыть движок/сессии, выполнить корутину, корректно всё закрыть."""
@@ -139,6 +143,134 @@ def run_cmd() -> None:
     from wb_monitor.app import run_app
 
     asyncio.run(run_app())
+
+
+@cli.command("setup")
+def setup_cmd() -> None:
+    """Спросить токен бота и создать .env (то же, что делает start.sh)."""
+    from wb_monitor.setup_wizard import main as wizard_main
+
+    raise SystemExit(wizard_main())
+
+
+@cli.command("doctor")
+def doctor() -> None:
+    """Проверить всё разом: токен, связь с WB, базу, админа, товары.
+
+    Первое, что стоит запустить, если сервис ведёт себя странно.
+    """
+    import httpx
+    from sqlalchemy import func, select
+
+    from wb_monitor.models import Client, ParseRun, PriceSnapshot, TrackedSKU
+    from wb_monitor.state import ADMIN_CHAT_ID_KEY, get_setting
+
+    problems: list[str] = []
+
+    def ok(text: str) -> None:
+        click.echo(f"  ✅ {text}")
+
+    def bad(text: str, fix: str) -> None:
+        click.echo(f"  ❌ {text}")
+        problems.append(fix)
+
+    click.echo("Настройки")
+    if settings.bot_token:
+        try:
+            response = httpx.get(
+                f"https://api.telegram.org/bot{settings.bot_token}/getMe", timeout=15.0
+            )
+            if response.status_code == 200:
+                ok(f"токен рабочий, бот @{response.json()['result']['username']}")
+            else:
+                bad(
+                    f"Telegram отклонил токен (HTTP {response.status_code})",
+                    "Перевыпусти токен у @BotFather и запусти ./start.sh --setup",
+                )
+        except httpx.HTTPError as exc:
+            bad(f"нет связи с Telegram: {exc}", "Проверь интернет/прокси.")
+    else:
+        bad("BOT_TOKEN не задан", "Запусти ./start.sh --setup")
+
+    click.echo("Wildberries")
+
+    async def _check_wb() -> None:
+        from wb_monitor.app import make_http_client
+        from wb_monitor.parser.wb_api import fetch_sku
+
+        async with make_http_client(settings) as http:
+            data = await fetch_sku(http, PROBE_NM_ID)
+        ok(f"карточка читается: «{data.name}», {data.price:.0f} руб.")
+
+    try:
+        asyncio.run(_check_wb())
+    except Exception as exc:  # noqa: BLE001 — доктору важно показать любую поломку
+        bad(
+            f"не удалось прочитать тестовую карточку: {exc}",
+            "WB недоступен или сменил разметку. Если это надолго — пропиши "
+            "PROXY_URL в .env; если сменилась разметка — правь parser/wb_api.py.",
+        )
+
+    click.echo("База данных")
+
+    async def _check_db(session_factory, get_bot) -> None:
+        async with session_factory() as session:
+            clients = (
+                await session.execute(select(func.count()).select_from(Client))
+            ).scalar_one()
+            skus = (
+                await session.execute(
+                    select(func.count()).select_from(TrackedSKU).where(TrackedSKU.is_active)
+                )
+            ).scalar_one()
+            snapshots = (
+                await session.execute(select(func.count()).select_from(PriceSnapshot))
+            ).scalar_one()
+            last_run = (
+                await session.execute(select(ParseRun).order_by(ParseRun.id.desc()).limit(1))
+            ).scalar_one_or_none()
+            stored_admin = await get_setting(session, ADMIN_CHAT_ID_KEY)
+
+        ok(f"файл на месте: {settings.db_path}")
+
+        admin_id = settings.admin_chat_id or (int(stored_admin) if stored_admin else 0)
+        if admin_id:
+            ok(f"админский чат: {admin_id}")
+        else:
+            bad(
+                "админ не назначен",
+                "Открой бота в Telegram и нажми /start — этот чат станет админским.",
+            )
+
+        if clients:
+            ok(f"клиентов: {clients}, активных товаров: {skus}")
+        else:
+            bad("клиентов нет", "Нажми /start в боте — владелец заводится автоматически.")
+
+        if skus == 0:
+            bad("нет отслеживаемых товаров", "В боте: «➕ Добавить товар» и ссылка на WB.")
+        elif snapshots == 0:
+            bad("нет ни одного замера", "В боте нажми «🔄 Проверить сейчас».")
+        elif snapshots < skus * 2:
+            ok(f"замеров: {snapshots} (алерты начнутся со второго замера по товару)")
+        else:
+            ok(f"замеров: {snapshots}")
+
+        if last_run is not None and last_run.is_suspicious:
+            bad(
+                f"последний проход #{last_run.id} помечен как подозрительный",
+                "Много ошибок парсинга — смотри раздел Wildberries выше.",
+            )
+
+    _run(_check_db)
+
+    click.echo()
+    if problems:
+        click.echo("Что починить:")
+        for i, fix in enumerate(problems, start=1):
+            click.echo(f"  {i}. {fix}")
+        raise SystemExit(1)
+    click.echo("Всё в порядке — сервис готов к работе.")
 
 
 # ------------------------------------------------------- администрирование

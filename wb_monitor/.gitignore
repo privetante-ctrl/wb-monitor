@@ -1,4 +1,0 @@
-.env
-*.db
-generated_reports/
-__pycache__/

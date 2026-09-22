@@ -1,5 +1,6 @@
-# systemd-юнит для основного процесса (бот + APScheduler).
-# Установка: см. README.md, раздел «Деплой на VPS».
+# systemd-юнит: держать сервис поднятым на VPS.
+# На своём компьютере он не нужен — там достаточно ./start.sh
+# Установка: см. README.md, раздел «Если хочется на сервер».
 [Unit]
 Description=WB competitor monitor (bot + scheduler)
 After=network-online.target
@@ -8,11 +9,12 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=wbmon
-WorkingDirectory=/opt/wb_monitor/wb_monitor
-ExecStart=/opt/wb_monitor/venv/bin/python cli.py run
+WorkingDirectory=/opt/wb-monitor
+# то же окружение, что создаёт start.sh — отдельный venv заводить не нужно
+ExecStart=/opt/wb-monitor/.venv/bin/python wb_monitor/cli.py run
 Restart=always
 RestartSec=10
-# .env лежит рядом с cli.py (WorkingDirectory), config.py подхватит его сам
+# .env лежит в wb_monitor/ рядом с config.py — он подхватит его сам
 
 # журналирование в journald
 StandardOutput=journal

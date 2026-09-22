@@ -2,3 +2,6 @@
 *.db
 generated_reports/
 __pycache__/
+.venv/
+venv/
+.pytest_cache/
