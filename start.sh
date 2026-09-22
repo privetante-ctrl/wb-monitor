@@ -96,10 +96,18 @@ fi
 
 # --------------------------------------------------------- 5. база
 
-"$VPY" "$PROJECT/cli.py" init-db >/dev/null || {
-  err "Не удалось создать базу данных."
+if ! db_log="$("$VPY" "$PROJECT/cli.py" init-db 2>&1)"; then
+  err "Не удалось создать базу данных. Что сказал Python:"
+  printf '%s\n' "$db_log" >&2
+  case "$db_log" in
+    *greenlet*)
+      err ""
+      err "Не хватает библиотеки greenlet. Лечится одной командой:"
+      err "  $VPY -m pip install greenlet"
+      ;;
+  esac
   exit 1
-}
+fi
 
 # --------------------------------------------------------- 6. запуск
 
